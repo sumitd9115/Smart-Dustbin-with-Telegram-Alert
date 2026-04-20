@@ -4,16 +4,16 @@
 #include <Servo.h>
 
 // === Wi-Fi Credentials ===
-const char* ssid = "132";
-const char* password = "qwertyuiop";
+const char* ssid = "";
+const char* password = "";
 
 // === ThingSpeak Details ===
-unsigned long channelID = 3149068;
-const char* writeAPIKey = "2RZCBJDNCMUWPNKB";
+unsigned long channelID = ;
+const char* writeAPIKey = "";
 
 // === Telegram Bot Details ===
-String botToken = "8399234752:AAHodmMRXl3QSU3QD28loX9fm4cTaqFN7yI";  // your bot token
-String chatID = "1729409880";  // your chat ID
+String botToken = "";  // your bot token
+String chatID = "";  // your chat ID
 String alertMessage = "🚮 Smart Bin Alert: The bin is more than 80% full! Please empty it soon.";
 
 const char* telegramHost = "api.telegram.org";
