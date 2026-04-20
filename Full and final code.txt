@@ -1,0 +1,140 @@
+#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include "ThingSpeak.h"
+#include <Servo.h>
+
+// === Wi-Fi Credentials ===
+const char* ssid = "132";
+const char* password = "qwertyuiop";
+
+// === ThingSpeak Details ===
+unsigned long channelID = 3149068;
+const char* writeAPIKey = "2RZCBJDNCMUWPNKB";
+
+// === Telegram Bot Details ===
+String botToken = "8399234752:AAHodmMRXl3QSU3QD28loX9fm4cTaqFN7yI";  // your bot token
+String chatID = "1729409880";  // your chat ID
+String alertMessage = "🚮 Smart Bin Alert: The bin is more than 80% full! Please empty it soon.";
+
+const char* telegramHost = "api.telegram.org";
+const int httpsPort = 443;
+
+// === Hardware Pins ===
+#define TRIG_OUT D7
+#define ECHO_OUT D2
+#define TRIG_IN  D5
+#define ECHO_IN  D6
+#define SERVO_PIN D4
+
+Servo lidServo;
+WiFiClient client;
+WiFiClientSecure secureClient;  // for Telegram HTTPS
+
+#define BIN_HEIGHT 25  // cm
+
+bool alertSent = false; // to prevent spamming messages
+
+// === Function to Measure Distance ===
+float getDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  float distance = duration * 0.034 / 2;
+  return distance;
+}
+
+// === Function to Send Telegram Alert ===
+void sendTelegramMessage(String text) {
+  secureClient.setInsecure(); // skip SSL verification
+
+  if (!secureClient.connect(telegramHost, httpsPort)) {
+    Serial.println("❌ Telegram connection failed!");
+    return;
+  }
+
+  text.replace(" ", "%20");
+  text.replace("🚮", "%F0%9F%9A%AE");
+
+  String url = "/bot" + botToken + "/sendMessage?chat_id=" + chatID + "&text=" + text;
+  Serial.println("📤 Sending Telegram alert...");
+  secureClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                     "Host: " + telegramHost + "\r\n" +
+                     "Connection: close\r\n\r\n");
+
+  while (secureClient.connected()) {
+    String line = secureClient.readStringUntil('\n');
+    if (line == "\r") break;
+  }
+  Serial.println("✅ Telegram alert sent!");
+}
+
+void setup() {
+  Serial.begin(9600);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\n✅ WiFi Connected!");
+  Serial.println(WiFi.localIP());
+
+  ThingSpeak.begin(client);
+
+  pinMode(TRIG_OUT, OUTPUT);
+  pinMode(ECHO_OUT, INPUT);
+  pinMode(TRIG_IN, OUTPUT);
+  pinMode(ECHO_IN, INPUT);
+
+  lidServo.attach(SERVO_PIN);
+  lidServo.write(90);
+
+  Serial.println("Smart Dustbin System Ready...");
+}
+
+void loop() {
+  // --- Outer Ultrasonic: Object Detection ---
+  float distanceOut = getDistance(TRIG_OUT, ECHO_OUT);
+  if (distanceOut > 0 && distanceOut < 15) {
+    Serial.println("Object detected! Opening lid...");
+    lidServo.write(0);
+    delay(2000);
+    lidServo.write(90);
+    Serial.println("Lid closed!");
+  }
+
+  // --- Inner Ultrasonic: Trash Level ---
+  float distanceIn = getDistance(TRIG_IN, ECHO_IN);
+  float filledPercent = ((BIN_HEIGHT - distanceIn) / BIN_HEIGHT) * 100.0;
+  filledPercent = constrain(filledPercent, 0, 100);
+
+  Serial.print("Filled: ");
+  Serial.print(filledPercent);
+  Serial.println("%");
+
+  // --- Send data to ThingSpeak ---
+  ThingSpeak.setField(1, filledPercent);
+  int status = ThingSpeak.writeFields(channelID, writeAPIKey);
+  if (status == 200)
+    Serial.println("✅ Data sent to ThingSpeak!");
+  else {
+    Serial.print("❌ ThingSpeak error: ");
+    Serial.println(status);
+  }
+
+  // --- Telegram Alert Condition ---
+  if (filledPercent >= 80 && !alertSent) {
+    sendTelegramMessage(alertMessage);
+    alertSent = true;
+  } 
+  else if (filledPercent < 50) {
+    // reset flag when bin is emptied
+    alertSent = false;
+  }
+
+  Serial.println("----------------------------------");
+  delay(15000); // ≥15 sec for ThingSpeak
+}
